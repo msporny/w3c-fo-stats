@@ -1,7 +1,7 @@
 {
-  "name": "w3c-spec-contrib",
+  "name": "w3c-fo-stats",
   "version": "0.0.1",
-  "description": "Calculate contributions to W3C specifications",
+  "description": "Calculate W3C Advisory Committee formal objections statistics",
   "main": "index.js",
   "dependencies": {
     "axios": "^0.23.0",
