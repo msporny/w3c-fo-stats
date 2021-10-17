@@ -1,0 +1,20 @@
+{
+  "name": "w3c-spec-contrib",
+  "version": "0.0.1",
+  "description": "Calculate contributions to W3C specifications",
+  "main": "index.js",
+  "dependencies": {
+    "axios": "^0.23.0",
+    "html-entities": "^2.3.2",
+    "mkdirp": "^0.5.5",
+    "prompt": "^1.2.0",
+    "prompt-sync": "^4.2.0",
+    "r2": "^2.0.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Manu Sporny <msporny@digitalbazaar.com> (https://manu.sporny.org/)",
+  "license": "W3C"
+}
