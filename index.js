@@ -12,6 +12,7 @@ const w3cpassword = prompt("What is your W3C password? ", {echo: '*'});
 // set directories and paths
 const tmpDir = path.join('tmp', 'w3c-fo-stats');
 const votesFile = path.join(tmpDir, 'votes.html');
+const acRepsFile = path.join(tmpDir, 'ac-reps.html');
 const resultsDir = path.join(tmpDir, 'results');
 
 // create directories
@@ -35,6 +36,28 @@ axios.interceptors.request.use((config) => {
     const votesHtml = response.data;
     fs.writeFileSync(votesFile, votesHtml);
   }
+
+  // get W3C Advisory Committee representative directory
+  if(!fs.existsSync(acRepsFile)) {
+    console.log(`Fetching W3C Advisory Committee representatives...`);
+    const response = await axios.get('https://www.w3.org/Member/ACList');
+    const acRepsHtml = response.data;
+    fs.writeFileSync(acRepsFile, acRepsHtml);
+  }
+
+  // build AC Reps to Organization map
+  const acRepsToOrganizationMap = {};
+  const acRepsHtml = fs.readFileSync(acRepsFile, 'utf-8');
+  const acRepsRegex = /<h2>([^<]*).*\n.*\n.*\n.*\n.*\n.*\n.*\n.*\n.*\n.*\n.*\n.*\n.*<h3 class="h5 card-title">\n\s*(.*)/g;
+  const allAcReps =
+    [...acRepsHtml.matchAll(acRepsRegex)];
+  for(const acRep of allAcReps) {
+    const acRepOrg = decode(acRep[1]).split(' - ')[0];
+    const acRepName = decode(acRep[2]);
+    acRepsToOrganizationMap[acRepName] = acRepOrg;
+  }
+  // bucket ex-AC Reps
+  acRepsToOrganizationMap['David Singer'] = 'Apple, Inc.';
 
   // search every ballot result for ones that we are interested in
   const votesHtml = fs.readFileSync(votesFile, 'utf-8');
@@ -72,7 +95,7 @@ axios.interceptors.request.use((config) => {
       [...ballotHtml.matchAll(votesRegex)];
     //console.log("ALL VOTES", allVotes.length);
     for(const vote of allVotes) {
-      const member = vote[1].trim().replace(/ \(.*\)/g, '');
+      let member = vote[1].trim().replace(/ \(.*\)/g, '');
       const position = vote[2].replace(/[\r\n]|  /g, ' ').trim();
 
       // ignore bad matches against the regex
@@ -86,6 +109,11 @@ axios.interceptors.request.use((config) => {
         console.log(`Member name parsing error in ${filename}.`);
         console.log('DEBUG: MEMBER VALUE', member);
         return;
+      }
+
+      // map individual AC Reps to their corresponding organization
+      if(member in acRepsToOrganizationMap) {
+        member = acRepsToOrganizationMap[member];
       }
 
       // create the member statistics object
@@ -133,11 +161,15 @@ axios.interceptors.request.use((config) => {
   });
 
   console.log(
-    'member'.padStart(40, ' '), '|',
-    'object'.padStart(6, ' '), '|',
-    'totl votes'.padStart(6, ' '), '|',
-    'object %'.padStart(8, ' '), '|');
-  console.log('---------------------------------------------------------------------------');
+    ''.padStart(40, ' '), '|',
+    'Objection'.padStart(10, ' '), '|',
+    'Total'.padStart(6, ' '), '|',
+    'Objection'.padStart(9, ' '), '|\n',
+    'W3C Member'.padStart(39, ' '), '|',
+    'Count'.padStart(10, ' '), '|',
+    'votes'.padStart(6, ' '), '|',
+    'Percent'.padStart(9, ' '), '|');
+  console.log('----------------------------------------------------------------------------');
 
   sortedTallies.forEach(item => {
     const totalVotes = item.formalObjection + item.abstain +
@@ -146,9 +178,9 @@ axios.interceptors.request.use((config) => {
       Math.floor((item.formalObjection / totalVotes) * 100);
     console.log(
       item.member.slice(0,39).padStart(40, ' '), '|',
-      item.formalObjection.toString().padStart(6, ' '), '|',
-      totalVotes.toString().padStart(10, ' '), '|',
-      (objectionPercentage.toString() + '%').padStart(8, ' '), '|');
+      item.formalObjection.toString().padStart(10, ' '), '|',
+      totalVotes.toString().padStart(6, ' '), '|',
+      (objectionPercentage.toString() + '%').padStart(9, ' '), '|');
   });
 
   //console.log(sortedTallies);
