@@ -58,6 +58,9 @@ axios.interceptors.request.use((config) => {
   }
   // bucket ex-AC Reps
   acRepsToOrganizationMap['David Singer'] = 'Apple, Inc.';
+  acRepsToOrganizationMap['Glenn Adams'] = 'Cox Communications, Inc.';
+  acRepsToOrganizationMap['Steve Sommers'] = 'Shift4 Corporation';
+  acRepsToOrganizationMap['David Rogers'] = 'Copper Horse Solutions Ltd';
 
   // search every ballot result for ones that we are interested in
   const votesHtml = fs.readFileSync(votesFile, 'utf-8');
@@ -84,16 +87,25 @@ axios.interceptors.request.use((config) => {
   }
 
   // process every ballot result and tally statistics
-  const memberTallies = {};
+  const ballotStats = {};
+  const memberStats = {};
   let totalObjections = 0;
   fs.readdirSync(resultsDir).forEach(filename => {
     const ballotFile = path.join(resultsDir, filename);
     const ballotHtml = fs.readFileSync(ballotFile, 'utf-8');
-    const votesRegex =
-      /<tr><th scope='row'>([^<]*)<\/th>\n<td>([^<]*)<\/td>/g;
+
+    // extract ballot-wide information
+    const votesRegex = /<tr><th scope='row'>([^<]*)<\/th>\n<td>([^<]*)<\/td>/g;
+    const titleRegex = /<title>.*: (.*) - .*<\/title>/;
+    const yearRegex = /(This questionnaire was open from ([0-9]{4})|This questionnaire is open from ([0-9]{4}))/;
+    let title = titleRegex.exec(ballotHtml)[1].trim();
+    const year = yearRegex.exec(ballotHtml)[2];
+    title = year + ' ' + title;
+
+    // process all votes in ballot
     const allVotes =
       [...ballotHtml.matchAll(votesRegex)];
-    //console.log("ALL VOTES", allVotes.length);
+    const talliedMembers = {};
     for(const vote of allVotes) {
       let member = vote[1].trim().replace(/ \(.*\)/g, '');
       const position = vote[2].replace(/[\r\n]|  /g, ' ').trim();
@@ -116,75 +128,159 @@ axios.interceptors.request.use((config) => {
         member = acRepsToOrganizationMap[member];
       }
 
+      // ignore duplicates, which are contained in some of the ballot results
+      if(member in talliedMembers) {
+        continue;
+      } else {
+        talliedMembers[member] = true;
+      }
+
       // create the member statistics object
-      if(memberTallies[member] === undefined) {
-        memberTallies[member] = {
+      if(memberStats[member] === undefined) {
+        memberStats[member] = {
           support: 0,
           doesNotSupport: 0,
           abstain: 0,
-          formalObjection: 0,
+          publishFormalObjection: 0,
+          charterFormalObjection: 0,
+          otherFormalObjection: 0,
+          totalFormalObjection: 0,
           unknown: 0
+        };
+      }
+
+      // create the charter statistics object
+      if(ballotStats[title] === undefined) {
+        ballotStats[title] = {
+          orgFormalObjections: [],
+          totalSupport: 0
         };
       }
 
       // add the member position to the tally
       const supportRegex = /(supports *publication)|(supports this Charter)|(support[s]? the proposal)|(supports the proposed Charters)|(supports this Activity Proposal)|(supports republishing|(supports extending the charter))/g;
       if(position.includes('[Formal Objection]')) {
-        memberTallies[member].formalObjection += 1;
+        if(position.includes('Charter')) {
+          memberStats[member].charterFormalObjection += 1;
+        } else if(position.includes('Recommendation')) {
+          memberStats[member].publishFormalObjection += 1;
+        } else {
+          memberStats[member].otherFormalObjection += 1;
+        }
+        ballotStats[title].orgFormalObjections.push(member);
+        memberStats[member].totalFormalObjection += 1;
         totalObjections += 1;
       } else if(position.includes('abstains') || position.includes('other')) {
-        memberTallies[member].abstain += 1;
+        memberStats[member].abstain += 1;
       } else if(position.includes('does not support')) {
-        memberTallies[member].doesNotSupport += 1;
+        memberStats[member].doesNotSupport += 1;
       }
       else if(supportRegex.test(position)) {
-        memberTallies[member].support += 1;
+        memberStats[member].support += 1;
+        ballotStats[title].totalSupport += 1;
       }
       else {
         console.log('DEBUG: UNKNOWN POSITION', member, position);
-        memberTallies[member].unknown += 1;
+        memberStats[member].unknown += 1;
       }
     }
   });
 
+  // sort the charter tallies by formal objection count
   // sort the member tallies by formal objections
-  const sortedTallies = [];
-  Object.keys(memberTallies).forEach(key => {
-    sortedTallies.push({
-      member: key,
-      ...memberTallies[key]
+  const sortedBallotTallies = [];
+  Object.keys(ballotStats).forEach(key => {
+    sortedBallotTallies.push({
+      title: key,
+      ...ballotStats[key]
     });
   });
 
-  sortedTallies.sort((a, b) => {
-    return b.formalObjection - a.formalObjection;
+
+  // sort the member tallies by formal objection count
+  const sortedMemberTallies = [];
+  Object.keys(memberStats).forEach(key => {
+    sortedMemberTallies.push({
+      member: key,
+      ...memberStats[key]
+    });
   });
 
+  console.log('\n-------------------- Most Supported Work at W3C -----------------------');
+  sortedBallotTallies.sort((a, b) => {
+    return b.totalSupport - a.totalSupport;
+  });
+
+  sortedBallotTallies.forEach(item => {
+    if(item.totalSupport > 39) {
+      console.log(item.title, '-', item.totalSupport, ' W3C Members supporting');
+    }
+  });
+
+  console.log('\n----------------------- Formal Objections by Charter -----------------------');
+  sortedBallotTallies.sort((a, b) => {
+    return b.orgFormalObjections.length - a.orgFormalObjections.length;
+  });
+
+  sortedBallotTallies.forEach(item => {
+    if(item.orgFormalObjections.length > 0 && item.title.includes('Charter')) {
+      console.log(
+        item.title, '-', item.orgFormalObjections.length, 'Formal Objections');
+      item.orgFormalObjections.forEach(member => {
+        console.log('  *', member);
+      });
+    }
+  });
+
+  console.log('\n--------------- Formal Objections by Proposed Recommendation ---------------');
+  sortedBallotTallies.sort((a, b) => {
+    return b.orgFormalObjections.length - a.orgFormalObjections.length;
+  });
+
+  sortedBallotTallies.forEach(item => {
+    if(item.orgFormalObjections.length > 0 && item.title.includes('Recommendation')) {
+      console.log(item.title);
+      item.orgFormalObjections.forEach(member => {
+        console.log('  *', member);
+      });
+    }
+  });
+
+  console.log('\n------------------ Formal Objections by W3C Member Company -----------------\n');
+  sortedMemberTallies.sort((a, b) => {
+    return b.totalFormalObjection - a.totalFormalObjection;
+  });
+
+  console.log('NOTE: Objection Breakdown - first column is FOs to charter, second is');
+  console.log('                            FOs to PR, third is total FOs\n');
   console.log(
     ''.padStart(40, ' '), '|',
     'Objection'.padStart(10, ' '), '|',
     'Total'.padStart(6, ' '), '|',
     'Objection'.padStart(9, ' '), '|\n',
     'W3C Member'.padStart(39, ' '), '|',
-    'Count'.padStart(10, ' '), '|',
+    'Breakdown'.padStart(10, ' '), '|',
     'votes'.padStart(6, ' '), '|',
     'Percent'.padStart(9, ' '), '|');
   console.log('----------------------------------------------------------------------------');
 
-  sortedTallies.forEach(item => {
-    const totalVotes = item.formalObjection + item.abstain +
+  sortedMemberTallies.forEach(item => {
+    const totalVotes = item.totalFormalObjection + item.abstain +
       item.doesNotSupport + item.support;
     const objectionPercentage =
-      Math.floor((item.formalObjection / totalVotes) * 100);
+      Math.floor((item.totalFormalObjection / totalVotes) * 100);
     console.log(
       item.member.slice(0,39).padStart(40, ' '), '|',
-      item.formalObjection.toString().padStart(10, ' '), '|',
+      item.charterFormalObjection.toString().padStart(2, ' '),
+      item.publishFormalObjection.toString().padStart(3, ' '),
+      item.totalFormalObjection.toString().padStart(3, ' '),
+      '|',
       totalVotes.toString().padStart(6, ' '), '|',
       (objectionPercentage.toString() + '%').padStart(9, ' '), '|');
   });
 
-  //console.log(sortedTallies);
-  console.log('Total Voters:', sortedTallies.length);
+  //console.log(sortedMemberTallies);
+  console.log('Total Voters:', sortedMemberTallies.length);
   console.log('Total Objections:', totalObjections);
 
 })();
